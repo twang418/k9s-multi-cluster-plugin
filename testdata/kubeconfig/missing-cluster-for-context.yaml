@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Config
+current-context: broken-context
+clusters:
+  - name: org1-dev
+    cluster:
+      server: https://org1.example.invalid
+  - name: org3-bu1
+    cluster:
+      server: https://org3.example.invalid
+contexts:
+  - name: broken-context
+    context:
+      cluster: missing-cluster
+      user: org1-user
+  - name: org3-context
+    context:
+      cluster: org3-bu1
+      user: org3-user
+users:
+  - name: org1-user
+    user:
+      token: test-token
+  - name: org3-user
+    user:
+      token: test-token

@@ -11,8 +11,11 @@ Keep 4 things separate:
 - a CLI override file for cluster-specific values
 - a generated K9s plugin file
 
-The template stays close to normal K9s plugin YAML. The override file is custom input for this CLI and is not native K9s plugin syntax.
-The CLI reads cluster names from kubeconfig, matches them against the override rules, and then applies replacements to the template.
+The template stays close to normal K9s plugin YAML, but uses gomplate-style
+template expressions for substitution and defaults. The override file is custom
+input for this CLI and is not native K9s plugin syntax. The CLI reads cluster
+names from kubeconfig, matches them against the override rules, and then renders
+the template with the matched values.
 
 ## Example K9s Plugin Template
 
@@ -50,13 +53,28 @@ plugins:
       - >-
         kubectl debug -it --context "$CONTEXT" -n "$NAMESPACE" "$POD"
         --target "$NAME"
-        --image "{{ image }}"
+        --image "{{ .image | default \"busybox\" }}"
         --profile "$INPUT_PROFILE"
         $([ "$INPUT_SHARE_PROCESSES" = "true" ] && echo "--share-processes")
         -- sh
 ```
 
-In this template, `{{ image }}` is a placeholder that the CLI replaces based on the matched cluster name from kubeconfig.
+In this template, `{{ .image | default "busybox" }}` means the CLI should use
+the matched cluster override for `image` when one exists, and otherwise fall
+back to the default value `busybox` defined directly in the template.
+
+## Template Syntax Direction
+
+The intended template syntax is gomplate-style, based on Go templates.
+
+- replacement values are exposed as template data fields such as `.image`
+- defaults can be defined in the template itself with functions such as
+  `default`
+- future template use may include more than scalar substitution, so the syntax
+  should stay compatible with richer gomplate-style expressions
+
+The goal is to keep the template close to normal K9s YAML while still allowing
+controlled template power where needed.
 
 ## Example CLI Override File
 
@@ -85,4 +103,6 @@ pluginOverrides:
 
 ## Expected Result
 
-For the active cluster name found in kubeconfig, the CLI resolves the matching rule, replaces `{{ image }}` in the template, and writes the final K9s plugin YAML.
+For the active cluster name found in kubeconfig, the CLI resolves the matching
+rule and renders the gomplate-style template. If no rule matches, the CLI uses
+the template-defined default value and writes the final K9s plugin YAML.

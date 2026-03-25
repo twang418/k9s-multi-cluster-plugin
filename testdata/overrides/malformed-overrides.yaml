@@ -1,0 +1,3 @@
+pluginOverrides:
+  debug:
+    clusters: invalid

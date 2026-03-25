@@ -1,0 +1,7 @@
+pluginOverrides:
+  debug:
+    clusters:
+      - match:
+          type: regex
+          value: ".*org1.*"
+        replace: {}
