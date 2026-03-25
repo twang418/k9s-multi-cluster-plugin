@@ -26,5 +26,7 @@ Fixture groups:
 - `kubeconfig/`: multi-cluster kubeconfig inputs that select an active cluster by
   `current-context`
 - `template/`: K9s plugin templates using gomplate-style expressions
+- `template-single/`: single-file template folder fixture for the first CLI slice
 - `overrides/`: cluster matching and replacement data
+- `overrides-single/`: single-file override folder fixture for the first CLI slice
 - `expected/`: golden outputs for successful render cases

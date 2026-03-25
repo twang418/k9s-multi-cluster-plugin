@@ -53,7 +53,7 @@ plugins:
       - >-
         kubectl debug -it --context "$CONTEXT" -n "$NAMESPACE" "$POD"
         --target "$NAME"
-        --image "{{ .image | default \"busybox\" }}"
+        --image "{{ .image | default "busybox" }}"
         --profile "$INPUT_PROFILE"
         $([ "$INPUT_SHARE_PROCESSES" = "true" ] && echo "--share-processes")
         -- sh
@@ -75,6 +75,18 @@ The intended template syntax is gomplate-style, based on Go templates.
 
 The goal is to keep the template close to normal K9s YAML while still allowing
 controlled template power where needed.
+
+## Initial Folder Convention
+
+The first implementation treats the template folder and override folder as
+directory inputs with a simple convention:
+
+- the template folder must contain exactly one `.yaml` or `.yml` file
+- the override folder must contain exactly one `.yaml` or `.yml` file
+- the template file must define exactly one plugin under `plugins`
+
+This keeps the first CLI slice deterministic and testable while leaving room for
+future expansion to multiple files.
 
 ## Example CLI Override File
 
@@ -106,3 +118,33 @@ pluginOverrides:
 For the active cluster name found in kubeconfig, the CLI resolves the matching
 rule and renders the gomplate-style template. If no rule matches, the CLI uses
 the template-defined default value and writes the final K9s plugin YAML.
+
+## CLI Usage
+
+The initial command shape is:
+
+```bash
+go run . generate \
+  --kubeconfig ./testdata/kubeconfig/active-org1.yaml \
+  --template-dir ./testdata/template-single \
+  --override-dir ./testdata/overrides-single \
+  --output ./out/plugin.yaml
+```
+
+This writes the rendered K9s plugin YAML to the requested output path.
+
+## Devcontainer
+
+The repository includes a devcontainer so Go build and test commands can run in
+a reproducible environment even when the host machine does not already have Go
+installed.
+
+Open the repository in the devcontainer, then run:
+
+```bash
+go mod download
+go build ./...
+go test ./...
+```
+
+The devcontainer is the intended environment for final feature verification.
