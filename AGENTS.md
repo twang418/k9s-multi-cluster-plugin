@@ -1,6 +1,6 @@
 # AGENTS.md
 Repository-specific guidance for agentic coding tools working in
-`/Users/tong/Development/k9s-multi-cluster-plugin`.
+`/Users/tong/Development/k9s-multi-cluster-plugin-implement-cli-e2e-suite-go`.
 
 This file is intentionally based on the repository as it exists today.
 Do not invent tooling, architecture, commands, or language-specific rules that are not present in the working tree.
@@ -8,7 +8,7 @@ Do not invent tooling, architecture, commands, or language-specific rules that a
 ## Current Repository State
 - The repository now includes a Go module and implementation source files.
 - The CLI is structured around Cobra commands.
-- Tests exist for command behavior and generator logic.
+- Tests exist for command behavior, generator logic, and CLI end-to-end flows.
 - There is still no repository-specific lint configuration.
 - No Cursor rules were found in `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md`.
 
@@ -42,8 +42,9 @@ Current template-direction guidance from `README.md`:
 Configured via Go module.
 
 Agent guidance:
-- Primary build command: `go build ./...`
-- CLI entrypoint build: `go build -o ./bin/k9s-multi-cluster-plugin .`
+- Run build commands inside the devcontainer.
+- Primary build command: `devcontainer exec --workspace-folder <repo> go build ./...`
+- CLI entrypoint build: `devcontainer exec --workspace-folder <repo> go build -o ./bin/k9s-multi-cluster-plugin .`
 
 ### Lint
 Not configured yet.
@@ -52,31 +53,39 @@ No detected repository-specific lint configuration such as golangci-lint.
 
 Agent guidance:
 - Do not claim lint passes unless a real lint tool exists and was run.
-- Use `gofmt -w .` for Go formatting until a repository-specific lint tool is added.
+- Run formatting inside the devcontainer.
+- Use `devcontainer exec --workspace-folder <repo> gofmt -w .` for Go formatting until a repository-specific lint tool is added.
 
 ### Test
 Configured via Go test.
 
 Agent guidance:
-- Full test command: `go test ./...`
-- Fixture-only, intentionally non-runnable test states are acceptable until a
-  real feature implementation and test runner exist.
-- Do not add fake failing tests or placeholder executables merely to simulate
-  progress.
+- Run tests inside the devcontainer.
+- Full test command: `devcontainer exec --workspace-folder <repo> go test ./...`
+- The repository includes a real fixture-backed CLI end-to-end suite under
+  `e2e/`.
+- The e2e suite supports `-e2e-auto-clean` and defaults it to `true`; use
+  `devcontainer exec --workspace-folder <repo> go test ./e2e -args -e2e-auto-clean=false`
+  when you need to keep rendered output workspaces on disk for inspection.
+- Manual rendered output can be written to `output/`, which is gitignored for
+  local inspection artifacts.
 
 ### Run A Single Test
 Configured via Go test selection flags.
 
 Example single-test commands:
-- One package: `go test ./internal/generator`
-- One named test: `go test ./internal/generator -run TestLoadActiveCluster`
+- One package: `devcontainer exec --workspace-folder <repo> go test ./internal/generator`
+- One named test: `devcontainer exec --workspace-folder <repo> go test ./internal/generator -run TestLoadActiveCluster`
+- One end-to-end test group: `devcontainer exec --workspace-folder <repo> go test ./e2e -run TestCLIEndToEndSuccessCases`
+- One end-to-end run preserving rendered output: `devcontainer exec --workspace-folder <repo> go test ./e2e -args -e2e-auto-clean=false`
+- One manual render for inspection: `devcontainer exec --workspace-folder <repo> go run . generate --kubeconfig testdata/kubeconfig/active-org1.yaml --template-dir testdata/template-single --override-dir testdata/overrides-single --output output/rendered-org1.yaml`
 
 ### Install Or Bootstrap
 Configured via Go modules.
 
-- Install dependencies: `go mod download`
-- Reproducible environment: open the repository in `.devcontainer/` and run
-  build/test commands there when host Go tooling is unavailable.
+- Install dependencies: `devcontainer exec --workspace-folder <repo> go mod download`
+- Start the reproducible environment with `devcontainer up --workspace-folder <repo>`.
+- Run all Go build, format, and test commands inside the devcontainer.
 
 ## Code Style Guidelines
 Follow the rules below, but let future repo config and established source files override these defaults.
@@ -161,8 +170,9 @@ When adding a new stack or tool:
   real test harness are implemented.
 
 For feature work:
-- Prefer using a separate git worktree for each feature so implementation work
-  stays isolated from other in-progress changes.
+- Before making code changes, create a separate git worktree with a new branch
+  for the feature in the current parent folder so implementation work stays
+  isolated from other in-progress changes.
 
 When updating this file:
 - Remove statements that are no longer true.

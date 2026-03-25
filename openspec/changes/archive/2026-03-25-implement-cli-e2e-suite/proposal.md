@@ -12,8 +12,12 @@ should be tracked separately so the suite can be enabled feature by feature.
 - Enable the documented success and failure cases from the existing fixture set.
 - Keep tests feature-gated so each fixture-backed test is enabled only when the
   corresponding CLI behavior exists.
-- Preserve exact golden-file comparison for successful renders and actionable
-  stderr assertions for failures.
+- Preserve exact golden-file verification for successful renders using a file
+  diff against expected output, plus actionable stderr assertions for failures.
+- Keep rendered test workspaces auto-cleaned by default while allowing an
+  explicit test flag to preserve generated output for inspection.
+- Allow manual local renders into a gitignored `output/` directory for
+  inspection without affecting repository state.
 
 ## Capabilities
 

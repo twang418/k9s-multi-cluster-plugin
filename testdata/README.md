@@ -1,25 +1,25 @@
 # Testdata
 
 This directory contains canonical fixture inputs and expected outputs for the
-planned end-to-end integration suite.
+end-to-end integration suite.
 
 Current status:
 
-- the fixtures are intentionally non-runnable today
-- the repository now contains a real CLI entrypoint and Go test coverage
-- the full fixture-backed end-to-end suite is still separate follow-up work
+- the repository contains a real CLI entrypoint and Go test coverage
+- the fixture-backed end-to-end suite now executes the real CLI from `go test`
+- overlapping override precedence remains a documented deferred case
 
-These files are still useful because they define the contract that a future
-implementation must satisfy.
+These files define the contract and golden outputs the end-to-end harness uses.
 
 Repository rule:
 
-- do not add fake failing tests, placeholder binaries, or invented harness code
-  just to make the suite appear executable
-- wait until a real project stack exists, then wire these fixtures into the real
-  integration tests
-- enable each fixture-backed test only when the corresponding feature behavior
-  exists in the real implementation
+- keep the suite black-box by invoking only the real CLI entrypoint or built
+  binary
+- use exact golden-file comparison for successful renders
+- enable overlapping-rule precedence coverage only after the precedence rule is
+  documented
+- use `go test ./e2e -args -e2e-auto-clean=false` when you want the rendered
+  output workspace to remain on disk for inspection
 
 Fixture groups:
 
