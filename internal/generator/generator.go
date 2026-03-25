@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"text/template"
 
 	"github.com/Masterminds/sprig/v3"
@@ -50,10 +51,6 @@ type namedUser struct {
 	Name string `yaml:"name"`
 }
 
-type templateDocument struct {
-	Plugins map[string]any `yaml:"plugins"`
-}
-
 type overrideDocument struct {
 	PluginOverrides map[string]pluginOverride `yaml:"pluginOverrides"`
 }
@@ -63,8 +60,8 @@ type pluginOverride struct {
 }
 
 type clusterRule struct {
-	Match   matchRule         `yaml:"match"`
-	Replace map[string]string `yaml:"replace"`
+	Match   matchRule      `yaml:"match"`
+	Replace map[string]any `yaml:"replace"`
 }
 
 type matchRule struct {
@@ -196,20 +193,16 @@ func loadTemplate(path string) ([]byte, string, error) {
 		return nil, "", fmt.Errorf("read template %q: %w", path, err)
 	}
 
-	var doc templateDocument
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, "", fmt.Errorf("parse template %q: %w", path, err)
+	pluginNames, err := discoverPluginNames(data)
+	if err != nil {
+		return nil, "", fmt.Errorf("inspect template %q: %w", path, err)
 	}
 
-	if len(doc.Plugins) != 1 {
-		return nil, "", fmt.Errorf("template %q must define exactly one plugin under plugins, found %d", path, len(doc.Plugins))
+	if len(pluginNames) != 1 {
+		return nil, "", fmt.Errorf("template %q must define exactly one plugin under plugins, found %d", path, len(pluginNames))
 	}
 
-	for name := range doc.Plugins {
-		return data, name, nil
-	}
-
-	return nil, "", fmt.Errorf("template %q does not define a plugin", path)
+	return data, pluginNames[0], nil
 }
 
 func loadReplacements(path, pluginName, activeCluster string) (map[string]any, error) {
@@ -247,6 +240,45 @@ func loadReplacements(path, pluginName, activeCluster string) (map[string]any, e
 	}
 
 	return map[string]any{}, nil
+}
+
+func discoverPluginNames(data []byte) ([]string, error) {
+	lines := strings.Split(string(data), "\n")
+	inPlugins := false
+	var names []string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		if !inPlugins {
+			if trimmed == "plugins:" {
+				inPlugins = true
+			}
+			continue
+		}
+
+		if strings.HasPrefix(line, " ") {
+			if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") {
+				key := strings.TrimSpace(line)
+				if strings.HasSuffix(key, ":") {
+					names = append(names, strings.TrimSuffix(key, ":"))
+				}
+				continue
+			}
+			continue
+		}
+
+		break
+	}
+
+	if len(names) == 0 {
+		return nil, errors.New("template does not define any plugin keys under plugins")
+	}
+
+	return names, nil
 }
 
 func (m matchRule) matches(clusterName string) (bool, error) {

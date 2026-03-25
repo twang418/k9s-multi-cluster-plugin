@@ -38,6 +38,9 @@ func TestLoadReplacements(t *testing.T) {
 	if values["image"] != "1111.dkr.ecr.ap-southeast-2.amazonaws.com/busybox:unstable-uclibc:1.37.0" {
 		t.Fatalf("unexpected image replacement: %#v", values["image"])
 	}
+	if got, ok := values["image"].(string); !ok || got == "" {
+		t.Fatalf("expected string image replacement, got %#v", values["image"])
+	}
 
 	values, err = loadReplacements(filepath.Join("..", "..", "testdata", "overrides", "standard-overrides.yaml"), "debug", "sandbox-team-a")
 	if err != nil {
@@ -45,6 +48,24 @@ func TestLoadReplacements(t *testing.T) {
 	}
 	if len(values) != 0 {
 		t.Fatalf("expected no values for unmatched cluster, got %#v", values)
+	}
+}
+
+func TestLoadTemplateAllowsTemplateDirectivesOutsideQuotedStrings(t *testing.T) {
+	t.Parallel()
+
+	templatePath := filepath.Join(t.TempDir(), "template.yaml")
+	content := []byte("plugins:\n  debug:\n    env: {{ .env | default (list) }}\n")
+	if err := os.WriteFile(templatePath, content, 0o644); err != nil {
+		t.Fatalf("write temp template: %v", err)
+	}
+
+	_, pluginName, err := loadTemplate(templatePath)
+	if err != nil {
+		t.Fatalf("loadTemplate returned error: %v", err)
+	}
+	if pluginName != "debug" {
+		t.Fatalf("expected plugin name debug, got %q", pluginName)
 	}
 }
 
