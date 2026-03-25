@@ -6,8 +6,8 @@ planned end-to-end integration suite.
 Current status:
 
 - the fixtures are intentionally non-runnable today
-- the repository does not yet contain a real CLI entrypoint
-- the repository does not yet contain a test runner or harness
+- the repository now contains a real CLI entrypoint and Go test coverage
+- the full fixture-backed end-to-end suite is still separate follow-up work
 
 These files are still useful because they define the contract that a future
 implementation must satisfy.
@@ -26,5 +26,7 @@ Fixture groups:
 - `kubeconfig/`: multi-cluster kubeconfig inputs that select an active cluster by
   `current-context`
 - `template/`: K9s plugin templates using gomplate-style expressions
+- `template-single/`: single-file template folder fixture for the first CLI slice
 - `overrides/`: cluster matching and replacement data
+- `overrides-single/`: single-file override folder fixture for the first CLI slice
 - `expected/`: golden outputs for successful render cases

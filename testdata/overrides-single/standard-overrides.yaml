@@ -1,0 +1,20 @@
+pluginOverrides:
+  debug:
+    clusters:
+      - match:
+          type: regex
+          value: ".*org1.*"
+        replace:
+          image: "1111.dkr.ecr.ap-southeast-2.amazonaws.com/busybox:unstable-uclibc:1.37.0"
+      - match:
+          type: regex
+          value: ".*org2.*"
+        replace:
+          image: "2222.dkr.ecr.ap-southeast-2.amazonaws.com/busybox:unstable-uclibc:1.37.0"
+      - match:
+          type: list
+          values:
+            - "org3-bu1"
+            - "org4-bu1"
+        replace:
+          image: "3333.dkr.ecr.ap-southeast-2.amazonaws.com/busybox:unstable-uclibc:1.37.0"

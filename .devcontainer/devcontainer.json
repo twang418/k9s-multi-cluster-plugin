@@ -1,0 +1,12 @@
+{
+  "name": "k9s-multi-cluster-plugin",
+  "image": "mcr.microsoft.com/devcontainers/go:1-1.22-bookworm",
+  "postCreateCommand": "go mod download",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go"
+      ]
+    }
+  }
+}
