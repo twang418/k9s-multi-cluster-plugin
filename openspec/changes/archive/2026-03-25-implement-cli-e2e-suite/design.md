@@ -28,6 +28,12 @@ cases can become executable.
 - Implement the suite as a real external-process harness, not by calling
   internal helpers directly.
 - Enable tests incrementally as the corresponding CLI features land.
+- Verify successful renders by diffing the generated output file against the
+  expected golden file so mismatches surface as a real file diff.
+- Create a dedicated test workspace per case and auto-clean it by default,
+  with an explicit test flag to preserve rendered outputs when debugging.
+- Keep a gitignored `output/` directory available for manual CLI renders when a
+  developer wants to inspect generated YAML outside the test harness.
 - Keep failure assertions focused on non-zero exit status, absent or empty
   output, and actionable stderr substrings.
 
