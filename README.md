@@ -150,10 +150,11 @@ go run . generate \
   --install-to-k9s
 ```
 
-In install mode, the CLI resolves the K9s data-home root from `XDG_DATA_HOME`
-or the platform default, then writes merged `plugins.yaml` files under
-`k9s/clusters/<cluster>/<context>/` for every context that points at the active
-cluster.
+In install mode, the CLI respects `K9S_CONFIG_DIR` when it is set. Otherwise it
+resolves the K9s data-home root from `XDG_DATA_HOME` or the platform default,
+then writes merged `plugins.yaml` files under the K9s cluster/context layout,
+using the same sanitized cluster and context path names that K9s uses on disk,
+for every context that points at the active cluster.
 
 If a target `plugins.yaml` already exists, the CLI preserves unrelated plugins
 and replaces only generated plugin keys with the newly rendered definitions.

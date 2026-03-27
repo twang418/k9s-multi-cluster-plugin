@@ -19,9 +19,12 @@ import (
 type OutputMode string
 
 const (
-	OutputModeFile OutputMode = "file"
-	OutputModeK9s  OutputMode = "k9s"
+	OutputModeFile  OutputMode = "file"
+	OutputModeK9s   OutputMode = "k9s"
+	k9sEnvConfigDir            = "K9S_CONFIG_DIR"
 )
+
+var invalidK9sPathCharsRX = regexp.MustCompile(`[:/]+`)
 
 type Request struct {
 	KubeconfigPath string
@@ -87,6 +90,11 @@ type clusterSelection struct {
 	ContextNames  []string
 }
 
+type k9sInstallPaths struct {
+	InstallRoot  string
+	ContextsRoot string
+}
+
 func Generate(req Request) (Result, error) {
 	req = normalizeRequest(req)
 
@@ -136,12 +144,12 @@ func Generate(req Request) (Result, error) {
 		}, nil
 	}
 
-	installRoot, err := resolveK9sDataRoot(req.K9sDataDir)
+	installPaths, err := resolveK9sInstallPaths(req.K9sDataDir)
 	if err != nil {
 		return Result{}, err
 	}
 
-	targetPaths := resolveK9sPluginPaths(installRoot, selection.ActiveCluster, selection.ContextNames)
+	targetPaths := resolveK9sPluginPaths(installPaths.ContextsRoot, selection.ActiveCluster, selection.ContextNames)
 	if err := installMergedPlugins(targetPaths, rendered); err != nil {
 		return Result{}, err
 	}
@@ -149,7 +157,7 @@ func Generate(req Request) (Result, error) {
 	return Result{
 		ActiveCluster: selection.ActiveCluster,
 		OutputPaths:   targetPaths,
-		InstallRoot:   installRoot,
+		InstallRoot:   installPaths.InstallRoot,
 	}, nil
 }
 
@@ -414,39 +422,64 @@ func renderTemplate(data []byte, values map[string]any) ([]byte, error) {
 	return rendered.Bytes(), nil
 }
 
-func resolveK9sDataRoot(explicit string) (string, error) {
+func resolveK9sInstallPaths(explicit string) (k9sInstallPaths, error) {
 	if explicit != "" {
-		return explicit, nil
+		return k9sInstallPaths{
+			InstallRoot:  explicit,
+			ContextsRoot: filepath.Join(explicit, "k9s", "clusters"),
+		}, nil
+	}
+
+	if env := os.Getenv(k9sEnvConfigDir); env != "" {
+		return k9sInstallPaths{
+			InstallRoot:  env,
+			ContextsRoot: filepath.Join(env, "clusters"),
+		}, nil
 	}
 
 	if env := os.Getenv("XDG_DATA_HOME"); env != "" {
-		return env, nil
+		return k9sInstallPaths{
+			InstallRoot:  env,
+			ContextsRoot: filepath.Join(env, "k9s", "clusters"),
+		}, nil
 	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("resolve home directory for K9s data root: %w", err)
+		return k9sInstallPaths{}, fmt.Errorf("resolve home directory for K9s data root: %w", err)
 	}
 
+	var installRoot string
 	switch runtime.GOOS {
 	case "darwin":
-		return filepath.Join(home, "Library", "Application Support"), nil
+		installRoot = filepath.Join(home, "Library", "Application Support")
 	case "windows":
 		if localAppData := os.Getenv("LocalAppData"); localAppData != "" {
-			return localAppData, nil
+			installRoot = localAppData
+			break
 		}
-		return filepath.Join(home, "AppData", "Local"), nil
+		installRoot = filepath.Join(home, "AppData", "Local")
 	default:
-		return filepath.Join(home, ".local", "share"), nil
+		installRoot = filepath.Join(home, ".local", "share")
 	}
+
+	return k9sInstallPaths{
+		InstallRoot:  installRoot,
+		ContextsRoot: filepath.Join(installRoot, "k9s", "clusters"),
+	}, nil
 }
 
-func resolveK9sPluginPaths(dataRoot, cluster string, contexts []string) []string {
+func resolveK9sPluginPaths(contextsRoot, cluster string, contexts []string) []string {
+	sanitizedCluster := sanitizeK9sPathName(cluster)
 	paths := make([]string, 0, len(contexts))
 	for _, contextName := range contexts {
-		paths = append(paths, filepath.Join(dataRoot, "k9s", "clusters", cluster, contextName, "plugins.yaml"))
+		paths = append(paths, filepath.Join(contextsRoot, sanitizedCluster, sanitizeK9sPathName(contextName), "plugins.yaml"))
 	}
 	return paths
+}
+
+func sanitizeK9sPathName(name string) string {
+	return invalidK9sPathCharsRX.ReplaceAllString(name, "-")
 }
 
 func installMergedPlugins(targetPaths []string, rendered []byte) error {
@@ -513,6 +546,9 @@ func parsePluginMap(data []byte, source string) (map[string]any, error) {
 
 	pluginsValue, hasPlugins := raw["plugins"]
 	if hasPlugins {
+		if pluginsValue == nil {
+			return map[string]any{}, nil
+		}
 		plugins, ok := pluginsValue.(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("plugin document %q has unsupported plugins shape", source)

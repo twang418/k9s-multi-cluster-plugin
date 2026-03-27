@@ -192,6 +192,46 @@ func TestGenerateInstallsMergedPluginsForAllMatchingContexts(t *testing.T) {
 	}
 }
 
+func TestGenerateInstallsIntoK9SConfigDirClustersRoot(t *testing.T) {
+	dataRoot := filepath.Join(t.TempDir(), "k9s-config")
+	t.Setenv(k9sEnvConfigDir, dataRoot)
+
+	result, err := Generate(Request{
+		KubeconfigPath: filepath.Join("..", "..", "testdata", "kubeconfig", "active-org1-multi-context.yaml"),
+		TemplateDir:    filepath.Join("..", "..", "testdata", "template-single"),
+		OverrideDir:    filepath.Join("..", "..", "testdata", "overrides-single"),
+		OutputMode:     OutputModeK9s,
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if result.InstallRoot != dataRoot {
+		t.Fatalf("expected install root %q, got %q", dataRoot, result.InstallRoot)
+	}
+
+	for _, targetPath := range []string{
+		filepath.Join(dataRoot, "clusters", "org1-dev", "org1-admin", "plugins.yaml"),
+		filepath.Join(dataRoot, "clusters", "org1-dev", "org1-context", "plugins.yaml"),
+	} {
+		if _, err := os.Stat(targetPath); err != nil {
+			t.Fatalf("expected generated plugins file %q: %v", targetPath, err)
+		}
+	}
+}
+
+func TestResolveK9sPluginPathsSanitizesClusterAndContextNames(t *testing.T) {
+	t.Parallel()
+
+	paths := resolveK9sPluginPaths(filepath.Join("/tmp", "k9s", "clusters"), "arn:aws:eks:cluster/dev", []string{"gke/project/dev", "kind:admin"})
+	want := []string{
+		filepath.Join("/tmp", "k9s", "clusters", "arn-aws-eks-cluster-dev", "gke-project-dev", "plugins.yaml"),
+		filepath.Join("/tmp", "k9s", "clusters", "arn-aws-eks-cluster-dev", "kind-admin", "plugins.yaml"),
+	}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("expected sanitized paths %#v, got %#v", want, paths)
+	}
+}
+
 func TestGenerateInstallFailsForMalformedExistingPlugins(t *testing.T) {
 	t.Parallel()
 
@@ -211,6 +251,18 @@ func TestGenerateInstallFailsForMalformedExistingPlugins(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), targetPath) {
 		t.Fatalf("expected error to include target path, got %v", err)
+	}
+}
+
+func TestParsePluginMapAllowsNullPlugins(t *testing.T) {
+	t.Parallel()
+
+	plugins, err := parsePluginMap([]byte("plugins: null\n"), "plugins.yaml")
+	if err != nil {
+		t.Fatalf("parsePluginMap returned error: %v", err)
+	}
+	if len(plugins) != 0 {
+		t.Fatalf("expected no plugins, got %#v", plugins)
 	}
 }
 
