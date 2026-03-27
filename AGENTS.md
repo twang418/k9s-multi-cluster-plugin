@@ -1,6 +1,6 @@
 # AGENTS.md
-Repository-specific guidance for agentic coding tools working in
-`/Users/tong/Development/k9s-multi-cluster-plugin`.
+Repository-specific guidance for agentic coding tools working in the current
+directory.
 
 This file is intentionally based on the repository as it exists today.
 Do not invent tooling, architecture, commands, or language-specific rules that are not present in the working tree.
