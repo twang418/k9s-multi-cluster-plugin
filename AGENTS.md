@@ -1,6 +1,6 @@
 # AGENTS.md
-Repository-specific guidance for agentic coding tools working in
-`/Users/tong/Development/k9s-multi-cluster-plugin-implement-cli-e2e-suite-go`.
+Repository-specific guidance for agentic coding tools working in the current
+directory.
 
 This file is intentionally based on the repository as it exists today.
 Do not invent tooling, architecture, commands, or language-specific rules that are not present in the working tree.
@@ -160,6 +160,25 @@ Before making changes:
 - Check for newly added manifests and instruction files.
 - Confirm whether this file also needs an update.
 
+### Git Worktree Setup
+Use the OpenCode worktree plugin workflow described in
+`https://github.com/kdcokenny/opencode-worktree` for isolated feature work.
+
+Agent guidance:
+- Prefer the `worktree_create` tool over manual `git worktree add` for feature
+  work.
+- Create feature worktrees from the current repository using a branch name that
+  matches the task, for example `feature/<short-name>`.
+- The worktree plugin creates the git worktree outside the repository,
+  auto-spawns a terminal, and starts OpenCode in the new worktree.
+- The plugin stores worktrees under
+  `~/.local/share/opencode/worktree/<project-id>/<branch>/`.
+- When work on that isolated branch is finished, prefer `worktree_delete` so
+  the plugin can run cleanup, snapshot commit any remaining changes, and remove
+  the worktree.
+- If the repository later adds `.opencode/worktree.jsonc`, keep it factual and
+  use it for sync and lifecycle hooks rather than inventing ad hoc setup steps.
+
 When adding a new stack or tool:
 - Record the real build command.
 - Record the real lint command.
@@ -170,9 +189,10 @@ When adding a new stack or tool:
   real test harness are implemented.
 
 For feature work:
-- Before making code changes, create a separate git worktree with a new branch
-  for the feature in the current parent folder so implementation work stays
-  isolated from other in-progress changes.
+- Before making code changes, create a separate worktree with
+  `worktree_create` on a new branch for the feature so implementation work
+  stays isolated from other in-progress changes.
+- Prefer the plugin-managed worktree lifecycle over manual setup and cleanup.
 
 When updating this file:
 - Remove statements that are no longer true.
@@ -189,3 +209,5 @@ If any of those files are added later, fold their repository-specific guidance i
 - Do not create fictional commands in documentation.
 - Do not claim formatting or linting standards that are not configured.
 - Do not replace repository evidence with generic agent preferences.
+- Do not bypass the worktree plugin with manual worktree setup unless the user
+  explicitly asks for a manual git workflow.
