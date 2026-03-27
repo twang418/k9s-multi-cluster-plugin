@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"text/template"
@@ -15,23 +16,37 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type OutputMode string
+
+const (
+	OutputModeFile  OutputMode = "file"
+	OutputModeK9s   OutputMode = "k9s"
+	k9sEnvConfigDir            = "K9S_CONFIG_DIR"
+)
+
+var invalidK9sPathCharsRX = regexp.MustCompile(`[:/]+`)
+
 type Request struct {
 	KubeconfigPath string
 	TemplateDir    string
 	OverrideDir    string
 	OutputPath     string
+	OutputMode     OutputMode
+	K9sDataDir     string
 }
 
 type Result struct {
 	ActiveCluster string
 	OutputPath    string
+	OutputPaths   []string
+	InstallRoot   string
 }
 
 type kubeconfig struct {
-	CurrentContext string              `yaml:"current-context"`
-	Contexts       []namedContext      `yaml:"contexts"`
-	Clusters       []namedCluster      `yaml:"clusters"`
-	Users          []namedUser         `yaml:"users"`
+	CurrentContext string         `yaml:"current-context"`
+	Contexts       []namedContext `yaml:"contexts"`
+	Clusters       []namedCluster `yaml:"clusters"`
+	Users          []namedUser    `yaml:"users"`
 }
 
 type namedContext struct {
@@ -70,7 +85,19 @@ type matchRule struct {
 	Values []string `yaml:"values"`
 }
 
+type clusterSelection struct {
+	ActiveCluster string
+	ContextNames  []string
+}
+
+type k9sInstallPaths struct {
+	InstallRoot  string
+	ContextsRoot string
+}
+
 func Generate(req Request) (Result, error) {
+	req = normalizeRequest(req)
+
 	if err := validateRequest(req); err != nil {
 		return Result{}, err
 	}
@@ -85,7 +112,7 @@ func Generate(req Request) (Result, error) {
 		return Result{}, err
 	}
 
-	activeCluster, err := loadActiveCluster(req.KubeconfigPath)
+	selection, err := loadClusterSelection(req.KubeconfigPath)
 	if err != nil {
 		return Result{}, err
 	}
@@ -95,7 +122,7 @@ func Generate(req Request) (Result, error) {
 		return Result{}, err
 	}
 
-	replacements, err := loadReplacements(overridePath, pluginName, activeCluster)
+	replacements, err := loadReplacements(overridePath, pluginName, selection.ActiveCluster)
 	if err != nil {
 		return Result{}, err
 	}
@@ -105,11 +132,40 @@ func Generate(req Request) (Result, error) {
 		return Result{}, err
 	}
 
-	if err := writeOutput(req.OutputPath, rendered); err != nil {
+	if req.OutputMode == OutputModeFile {
+		if err := writeOutput(req.OutputPath, rendered); err != nil {
+			return Result{}, err
+		}
+
+		return Result{
+			ActiveCluster: selection.ActiveCluster,
+			OutputPath:    req.OutputPath,
+			OutputPaths:   []string{req.OutputPath},
+		}, nil
+	}
+
+	installPaths, err := resolveK9sInstallPaths(req.K9sDataDir)
+	if err != nil {
 		return Result{}, err
 	}
 
-	return Result{ActiveCluster: activeCluster, OutputPath: req.OutputPath}, nil
+	targetPaths := resolveK9sPluginPaths(installPaths.ContextsRoot, selection.ActiveCluster, selection.ContextNames)
+	if err := installMergedPlugins(targetPaths, rendered); err != nil {
+		return Result{}, err
+	}
+
+	return Result{
+		ActiveCluster: selection.ActiveCluster,
+		OutputPaths:   targetPaths,
+		InstallRoot:   installPaths.InstallRoot,
+	}, nil
+}
+
+func normalizeRequest(req Request) Request {
+	if req.OutputMode == "" && req.OutputPath != "" {
+		req.OutputMode = OutputModeFile
+	}
+	return req
 }
 
 func validateRequest(req Request) error {
@@ -122,8 +178,23 @@ func validateRequest(req Request) error {
 	if req.OverrideDir == "" {
 		return errors.New("override directory is required")
 	}
-	if req.OutputPath == "" {
-		return errors.New("output path is required")
+	switch req.OutputMode {
+	case OutputModeFile:
+		if req.OutputPath == "" {
+			return errors.New("output path is required for file output mode")
+		}
+	case OutputModeK9s:
+		if req.OutputPath != "" {
+			return errors.New("output path cannot be used with K9s install mode")
+		}
+	default:
+		if req.OutputPath != "" {
+			return fmt.Errorf("unsupported output mode %q", req.OutputMode)
+		}
+		return errors.New("exactly one output mode is required: use --output or --install-to-k9s")
+	}
+	if req.OutputMode == OutputModeK9s && req.K9sDataDir != "" && filepath.Clean(req.K9sDataDir) == "." {
+		return errors.New("K9s data directory must be a valid path")
 	}
 	return nil
 }
@@ -156,35 +227,60 @@ func discoverSingleYAML(dir, label string) (string, error) {
 }
 
 func loadActiveCluster(path string) (string, error) {
+	selection, err := loadClusterSelection(path)
+	if err != nil {
+		return "", err
+	}
+	return selection.ActiveCluster, nil
+}
+
+func loadClusterSelection(path string) (clusterSelection, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("read kubeconfig %q: %w", path, err)
+		return clusterSelection{}, fmt.Errorf("read kubeconfig %q: %w", path, err)
 	}
 
 	var cfg kubeconfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return "", fmt.Errorf("parse kubeconfig %q: %w", path, err)
+		return clusterSelection{}, fmt.Errorf("parse kubeconfig %q: %w", path, err)
 	}
 
 	if cfg.CurrentContext == "" {
-		return "", fmt.Errorf("kubeconfig %q is missing current-context", path)
+		return clusterSelection{}, fmt.Errorf("kubeconfig %q is missing current-context", path)
 	}
 
+	clusterNames := make(map[string]struct{}, len(cfg.Clusters))
+	for _, cluster := range cfg.Clusters {
+		clusterNames[cluster.Name] = struct{}{}
+	}
+
+	var activeCluster string
 	for _, ctx := range cfg.Contexts {
 		if ctx.Name == cfg.CurrentContext {
 			if ctx.Context.Cluster == "" {
-				return "", fmt.Errorf("kubeconfig context %q does not reference a cluster", cfg.CurrentContext)
+				return clusterSelection{}, fmt.Errorf("kubeconfig context %q does not reference a cluster", cfg.CurrentContext)
 			}
-			for _, cluster := range cfg.Clusters {
-				if cluster.Name == ctx.Context.Cluster {
-					return cluster.Name, nil
-				}
+			if _, ok := clusterNames[ctx.Context.Cluster]; !ok {
+				return clusterSelection{}, fmt.Errorf("kubeconfig context %q references missing cluster %q", cfg.CurrentContext, ctx.Context.Cluster)
 			}
-			return "", fmt.Errorf("kubeconfig context %q references missing cluster %q", cfg.CurrentContext, ctx.Context.Cluster)
+			activeCluster = ctx.Context.Cluster
+			break
 		}
 	}
 
-	return "", fmt.Errorf("kubeconfig current-context %q does not match any context", cfg.CurrentContext)
+	if activeCluster == "" {
+		return clusterSelection{}, fmt.Errorf("kubeconfig current-context %q does not match any context", cfg.CurrentContext)
+	}
+
+	contextNames := make([]string, 0, len(cfg.Contexts))
+	for _, ctx := range cfg.Contexts {
+		if ctx.Context.Cluster == activeCluster {
+			contextNames = append(contextNames, ctx.Name)
+		}
+	}
+	sort.Strings(contextNames)
+
+	return clusterSelection{ActiveCluster: activeCluster, ContextNames: contextNames}, nil
 }
 
 func loadTemplate(path string) ([]byte, string, error) {
@@ -324,6 +420,164 @@ func renderTemplate(data []byte, values map[string]any) ([]byte, error) {
 	}
 
 	return rendered.Bytes(), nil
+}
+
+func resolveK9sInstallPaths(explicit string) (k9sInstallPaths, error) {
+	if explicit != "" {
+		return k9sInstallPaths{
+			InstallRoot:  explicit,
+			ContextsRoot: filepath.Join(explicit, "k9s", "clusters"),
+		}, nil
+	}
+
+	if env := os.Getenv(k9sEnvConfigDir); env != "" {
+		return k9sInstallPaths{
+			InstallRoot:  env,
+			ContextsRoot: filepath.Join(env, "clusters"),
+		}, nil
+	}
+
+	if env := os.Getenv("XDG_DATA_HOME"); env != "" {
+		return k9sInstallPaths{
+			InstallRoot:  env,
+			ContextsRoot: filepath.Join(env, "k9s", "clusters"),
+		}, nil
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return k9sInstallPaths{}, fmt.Errorf("resolve home directory for K9s data root: %w", err)
+	}
+
+	var installRoot string
+	switch runtime.GOOS {
+	case "darwin":
+		installRoot = filepath.Join(home, "Library", "Application Support")
+	case "windows":
+		if localAppData := os.Getenv("LocalAppData"); localAppData != "" {
+			installRoot = localAppData
+			break
+		}
+		installRoot = filepath.Join(home, "AppData", "Local")
+	default:
+		installRoot = filepath.Join(home, ".local", "share")
+	}
+
+	return k9sInstallPaths{
+		InstallRoot:  installRoot,
+		ContextsRoot: filepath.Join(installRoot, "k9s", "clusters"),
+	}, nil
+}
+
+func resolveK9sPluginPaths(contextsRoot, cluster string, contexts []string) []string {
+	sanitizedCluster := sanitizeK9sPathName(cluster)
+	paths := make([]string, 0, len(contexts))
+	for _, contextName := range contexts {
+		paths = append(paths, filepath.Join(contextsRoot, sanitizedCluster, sanitizeK9sPathName(contextName), "plugins.yaml"))
+	}
+	return paths
+}
+
+func sanitizeK9sPathName(name string) string {
+	return invalidK9sPathCharsRX.ReplaceAllString(name, "-")
+}
+
+func installMergedPlugins(targetPaths []string, rendered []byte) error {
+	generatedPlugins, err := parsePluginMap(rendered, "rendered output")
+	if err != nil {
+		return err
+	}
+
+	for _, targetPath := range targetPaths {
+		existingPlugins, err := loadExistingPlugins(targetPath)
+		if err != nil {
+			return err
+		}
+
+		merged := mergePluginMaps(existingPlugins, generatedPlugins)
+		content, err := marshalPluginDocument(merged)
+		if err != nil {
+			return fmt.Errorf("marshal merged plugins for %q: %w", targetPath, err)
+		}
+
+		if err := writeOutput(targetPath, content); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func loadExistingPlugins(path string) (map[string]any, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]any{}, nil
+		}
+		return nil, fmt.Errorf("read existing plugins %q: %w", path, err)
+	}
+
+	plugins, err := parsePluginMap(data, path)
+	if err != nil {
+		return nil, err
+	}
+	return plugins, nil
+}
+
+func parsePluginMap(data []byte, source string) (map[string]any, error) {
+	if len(bytes.TrimSpace(data)) == 0 {
+		return map[string]any{}, nil
+	}
+
+	var wrapped struct {
+		Plugins map[string]any `yaml:"plugins"`
+	}
+	if err := yaml.Unmarshal(data, &wrapped); err == nil && wrapped.Plugins != nil {
+		return wrapped.Plugins, nil
+	}
+
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse plugin document %q: %w", source, err)
+	}
+	if raw == nil {
+		return map[string]any{}, nil
+	}
+
+	pluginsValue, hasPlugins := raw["plugins"]
+	if hasPlugins {
+		if pluginsValue == nil {
+			return map[string]any{}, nil
+		}
+		plugins, ok := pluginsValue.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("plugin document %q has unsupported plugins shape", source)
+		}
+		return plugins, nil
+	}
+
+	for name, value := range raw {
+		if _, ok := value.(map[string]any); !ok {
+			return nil, fmt.Errorf("plugin document %q has unsupported top-level entry %q", source, name)
+		}
+	}
+
+	return raw, nil
+}
+
+func mergePluginMaps(existing, generated map[string]any) map[string]any {
+	merged := make(map[string]any, len(existing)+len(generated))
+	for key, value := range existing {
+		merged[key] = value
+	}
+	for key, value := range generated {
+		merged[key] = value
+	}
+	return merged
+}
+
+func marshalPluginDocument(plugins map[string]any) ([]byte, error) {
+	return yaml.Marshal(map[string]any{"plugins": plugins})
 }
 
 func writeOutput(path string, data []byte) error {

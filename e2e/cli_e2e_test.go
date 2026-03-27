@@ -7,10 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -228,6 +231,39 @@ func TestCLIEndToEndFailureCases(t *testing.T) {
 	}
 }
 
+func TestCLIEndToEndK9sInstallMode(t *testing.T) {
+	t.Parallel()
+
+	workspace := newTestWorkspace(t)
+	templateDir := copyFixtureToSingleFileDir(t, workspace, "template", fixturePath("template", "debug-template.yaml"))
+	overrideDir := copyFixtureToSingleFileDir(t, workspace, "overrides", fixturePath("overrides", "standard-overrides.yaml"))
+	dataRoot := filepath.Join(workspace, "xdg-data")
+
+	adminPath := filepath.Join(dataRoot, "k9s", "clusters", "org1-dev", "org1-admin", "plugins.yaml")
+	contextPath := filepath.Join(dataRoot, "k9s", "clusters", "org1-dev", "org1-context", "plugins.yaml")
+	writeFile(t, adminPath, []byte("plugins:\n  existing-admin:\n    shortCut: Shift-A\n    description: Keep me\n"))
+	writeFile(t, contextPath, []byte("plugins:\n  debug:\n    shortCut: Shift-X\n    description: Old debug\n  existing-context:\n    shortCut: Shift-C\n    description: Keep me too\n"))
+
+	result := runCLI(t,
+		"generate",
+		"--kubeconfig", fixturePath("kubeconfig", "active-org1-multi-context.yaml"),
+		"--template-dir", templateDir,
+		"--override-dir", overrideDir,
+		"--install-to-k9s",
+		"--k9s-data-dir", dataRoot,
+	)
+
+	if result.exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr=%s", result.exitCode, result.stderr)
+	}
+	if !strings.Contains(result.stdout, "generated 2 K9s plugin file(s)") {
+		t.Fatalf("expected install summary, got %q", result.stdout)
+	}
+
+	assertPluginDocumentsEqual(t, fixturePath("expected", "k9s-install-org1-admin.yaml"), adminPath)
+	assertPluginDocumentsEqual(t, fixturePath("expected", "k9s-install-org1-context.yaml"), contextPath)
+}
+
 type cliResult struct {
 	exitCode int
 	stdout   string
@@ -333,6 +369,17 @@ func mustReadFile(t *testing.T, path string) []byte {
 	return data
 }
 
+func writeFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create parent directory for %q: %v", path, err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file %q: %v", path, err)
+	}
+}
+
 func assertNoMeaningfulOutput(t *testing.T, path string) {
 	t.Helper()
 
@@ -372,6 +419,27 @@ func assertFilesMatchDiff(t *testing.T, expectedPath, actualPath string) {
 	}
 
 	t.Fatalf("diff failed for %q and %q: %v\n%s", expectedPath, actualPath, err, output)
+}
+
+func assertPluginDocumentsEqual(t *testing.T, expectedPath, actualPath string) {
+	t.Helper()
+
+	expected := readPluginDocument(t, expectedPath)
+	actual := readPluginDocument(t, actualPath)
+	if !reflect.DeepEqual(expected, actual) {
+		t.Fatalf("plugin documents differed for %q and %q\nexpected=%#v\nactual=%#v", expectedPath, actualPath, expected, actual)
+	}
+}
+
+func readPluginDocument(t *testing.T, path string) map[string]any {
+	t.Helper()
+
+	data := mustReadFile(t, path)
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("unmarshal plugin document %q: %v", path, err)
+	}
+	return doc
 }
 
 func fixturePath(parts ...string) string {

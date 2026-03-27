@@ -2,6 +2,9 @@
 
 This project is for a CLI that generates K9s plugin configuration for multiple clusters from a shared template plus cluster-specific overrides.
 
+It supports both writing one standalone rendered file and installing merged
+plugin definitions into K9s context-specific plugin paths.
+
 ## Approach
 
 Keep 4 things separate:
@@ -10,6 +13,10 @@ Keep 4 things separate:
 - a K9s plugin template
 - a CLI override file for cluster-specific values
 - a generated K9s plugin file
+
+When you want the CLI to install directly into K9s, it writes to
+`$XDG_DATA_HOME/k9s/clusters/<cluster>/<context>/plugins.yaml` for each
+kubeconfig context that references the active cluster.
 
 The template stays close to normal K9s plugin YAML, but uses gomplate-style
 template expressions for substitution and defaults. The override file is custom
@@ -121,7 +128,7 @@ the template-defined default value and writes the final K9s plugin YAML.
 
 ## CLI Usage
 
-The initial command shape is:
+To write one standalone rendered file:
 
 ```bash
 go run . generate \
@@ -132,6 +139,25 @@ go run . generate \
 ```
 
 This writes the rendered K9s plugin YAML to the requested output path.
+
+To install into K9s context-specific plugin files:
+
+```bash
+go run . generate \
+  --kubeconfig ./testdata/kubeconfig/active-org1.yaml \
+  --template-dir ./testdata/template-single \
+  --override-dir ./testdata/overrides-single \
+  --install-to-k9s
+```
+
+In install mode, the CLI respects `K9S_CONFIG_DIR` when it is set. Otherwise it
+resolves the K9s data-home root from `XDG_DATA_HOME` or the platform default,
+then writes merged `plugins.yaml` files under the K9s cluster/context layout,
+using the same sanitized cluster and context path names that K9s uses on disk,
+for every context that points at the active cluster.
+
+If a target `plugins.yaml` already exists, the CLI preserves unrelated plugins
+and replaces only generated plugin keys with the newly rendered definitions.
 
 ## Devcontainer
 

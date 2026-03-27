@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Config
+current-context: org1-context
+clusters:
+  - name: org1-dev
+    cluster:
+      server: https://org1.example.invalid
+  - name: sandbox-team-a
+    cluster:
+      server: https://sandbox.example.invalid
+contexts:
+  - name: org1-context
+    context:
+      cluster: org1-dev
+      user: org1-user
+  - name: org1-admin
+    context:
+      cluster: org1-dev
+      user: org1-admin-user
+  - name: sandbox-context
+    context:
+      cluster: sandbox-team-a
+      user: sandbox-user
+users:
+  - name: org1-user
+    user:
+      token: test-token
+  - name: org1-admin-user
+    user:
+      token: test-token
+  - name: sandbox-user
+    user:
+      token: test-token
